@@ -1,5 +1,6 @@
 import pandas as pd
 import random
+
 def run_optimization(input_excel_path):
     # Excelファイルを読み込む（IDとスコア列を取得）
     df = pd.read_excel(input_excel_path, engine='openpyxl')
@@ -36,19 +37,22 @@ def run_optimization(input_excel_path):
     fixed_ids = fixed_df[id_col].tolist()
     remaining_df = df[~df[id_col].isin(fixed_ids)].copy()
 
-    # 軽量化：ランダムに1000通りの順列を試す
-    best_order = None
-    best_score = -1
+    # 最適化：3グループに分ける（空行を挿入し、Must Separateを厳密にチェック）
+    best_groups = None
+    best_score = float('inf')
     remaining_ids = remaining_df[id_col].tolist()
 
     for _ in range(1000):
         random.shuffle(remaining_ids)
+        groups = [[], [], []]
+        for i, rid in enumerate(remaining_ids):
+            groups[i % 3].append(rid)
 
-        # Must Separateのチェック（隣接していないか）
+        # Must Separateチェック：同じグループに含まれていないか
         valid = True
         for a, b in must_separate:
-            for i in range(len(remaining_ids) - 1):
-                if (remaining_ids[i] == a and remaining_ids[i + 1] == b) or (remaining_ids[i] == b and remaining_ids[i + 1] == a):
+            for group in groups:
+                if a in group and b in group:
                     valid = False
                     break
             if not valid:
@@ -56,22 +60,26 @@ def run_optimization(input_excel_path):
         if not valid:
             continue
 
-        # スコア平均を計算
-        temp_df = remaining_df.set_index(id_col).loc[remaining_ids].reset_index()
-        avg_score = temp_df[score_col].mean()
+        # 各グループのスコア平均の分散を計算
+        variances = []
+        for group in groups:
+            scores = remaining_df[remaining_df[id_col].isin(group)][score_col]
+            if not scores.empty:
+                variances.append(scores.mean())
+        score_variance = pd.Series(variances).var()
 
-        if avg_score > best_score:
-            best_score = avg_score
-            best_order = remaining_ids.copy()
+        if score_variance < best_score:
+            best_score = score_variance
+            best_groups = groups
 
-    # 最終結果を結合
-    optimized_df = pd.concat([
-        fixed_df,
-        remaining_df.set_index(id_col).loc[best_order].reset_index()
-    ], ignore_index=True)
+    # 最終結果を構築（空行を挿入）
+    result_df = fixed_df.copy()
+    for group in best_groups:
+        group_df = remaining_df[remaining_df[id_col].isin(group)]
+        result_df = pd.concat([result_df, group_df, pd.DataFrame({id_col: [''], score_col: ['']})], ignore_index=True)
 
     # 結果を保存
     output_excel = "optimized_assignment.xlsx"
-    optimized_df.to_excel(output_excel, index=False)
+    result_df.to_excel(output_excel, index=False)
 
     return output_excel
