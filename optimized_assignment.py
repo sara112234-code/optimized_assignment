@@ -1,3 +1,5 @@
+import pandas as pd
+import random
 def run_optimization(input_excel_path):
     # Excelファイルを読み込む（IDとスコア列を取得）
     df = pd.read_excel(input_excel_path, engine='openpyxl')
