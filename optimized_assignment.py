@@ -2,52 +2,54 @@ import pandas as pd
 import itertools
 
 def run_optimization(uploaded_file):
-    df = pd.read_excel(uploaded_file)
+    df = pd.read_excel(uploaded_file, engine='openpyxl')
+    columns = df.columns.str.lower()
+    score_col = None
+    for col in df.columns:
+        if col.lower() in ['スコア', 'average score']:
+            score_col = col
+            break
+    if score_col is None:
+        raise ValueError("スコア列が見つかりません。'スコア' または 'average score' の列名を使用してください。")
 
-    # Must Pair と Must Separate の定義（必要に応じて変更）
-    must_pair = [(2, 14), (5, 15)]
-    must_separate = [(3, 16), (6, 17)]
+    if 'ID' not in df.columns:
+        raise ValueError("ID列が見つかりません。列名は 'ID' にしてください。")
 
-    # ID 1〜13 を固定とみなす
-    fixed_ids = set(range(1, 14))
+    fixed_df = df[df['ID'].between(1, 13)].copy()
 
-    # Must Pair の ID を固定に追加
+    must_pair = [(3, 16)]
     for pair in must_pair:
-        fixed_ids.update(pair)
+        for pid in pair:
+            if pid not in fixed_df['ID'].values:
+                pair_df = df[df['ID'] == pid]
+                fixed_df = pd.concat([fixed_df, pair_df])
 
-    # 固定項目と最適化対象に分割
-    fixed_df = df[df['ID'].isin(fixed_ids)].copy()
-    optimize_df = df[~df['ID'].isin(fixed_ids)].copy()
+    fixed_ids = fixed_df['ID'].tolist()
+    remaining_df = df[~df['ID'].isin(fixed_ids)].copy()
 
-    # 最適化対象の ID リスト
-    optimize_ids = optimize_df['ID'].tolist()
+    must_separate = [(6, 17)]
 
-    # 最適化対象の順列を生成
-    best_score = -1
     best_order = None
-    for perm in itertools.permutations(optimize_ids):
-        # Must Separate のチェック
-        invalid = False
+    best_score = -1
+    for perm in itertools.permutations(remaining_df.to_dict('records')):
+        ids = [row['ID'] for row in perm]
+        valid = True
         for a, b in must_separate:
-            for i in range(len(perm) - 1):
-                if (perm[i] == a and perm[i+1] == b) or (perm[i] == b and perm[i+1] == a):
-                    invalid = True
+            if a in ids and b in ids:
+                if abs(ids.index(a) - ids.index(b)) == 1:
+                    valid = False
                     break
-            if invalid:
-                break
-        if invalid:
+        if not valid:
             continue
-
-        # スコア平均の計算
-        scores = [optimize_df[optimize_df['ID'] == i]['スコア'].values[0] for i in perm]
-        avg_score = sum(scores) / len(scores)
+        avg_score = sum([row[score_col] for row in perm]) / len(perm)
         if avg_score > best_score:
             best_score = avg_score
             best_order = perm
 
-    # 最適順序で並べ替え
-    best_optimize_df = pd.concat([optimize_df[optimize_df['ID'] == i] for i in best_order])
+    optimized_df = pd.concat([fixed_df, pd.DataFrame(best_order)])
+    optimized_df.reset_index(drop=True, inplace=True)
 
-    # 最終結果を結合して保存
-    final_df = pd.concat([fixed_df, best_optimize_df])
-    final_df.to_excel("optimized_assignment.xlsx", index=False)
+    output_path = "optimized_assignment.xlsx"
+    optimized_df.to_excel(output_path, index=False)
+
+    return output_path
