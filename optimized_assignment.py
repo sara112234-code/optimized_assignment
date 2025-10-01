@@ -1,35 +1,32 @@
 import pandas as pd
 import itertools
-from openpyxl import Workbook
 
-def run_optimization():
-    data = {
-        'ID': list(range(1, 21)),
-        'Score': [80, 75, 90, 85, 70, 95, 88, 76, 82, 91, 77, 84, 79, 65, 68, 72, 74, 69, 73, 71]
-    }
-    df = pd.DataFrame(data)
+def run_optimization(uploaded_file):
+    # Read the uploaded Excel file
+    df = pd.read_excel(uploaded_file, engine='openpyxl')
 
-    fixed_df = df[df['ID'] <= 13].copy()
-    target_df = df[df['ID'] > 13].copy()
+    # 固定項目（ID 1〜13）を抽出
+    fixed_df = df[df['固定'] == 1].copy()
 
-    best_order = None
+    # 最適化対象（ID 14〜）を抽出
+    target_df = df[df['固定'] != 1].copy()
+
+    # 最適化対象の順列を生成
+    permutations = list(itertools.permutations(target_df.index))
+
     best_score = -1
-    for perm in itertools.permutations(target_df['ID'].tolist()):
-        perm_scores = [df[df['ID'] == pid]['Score'].values[0] for pid in perm]
-        avg_score = sum(perm_scores) / len(perm_scores)
+    best_order = None
+
+    # 各順列についてスコア平均を計算
+    for perm in permutations:
+        ordered_df = target_df.loc[list(perm)].reset_index(drop=True)
+        combined_df = pd.concat([fixed_df.reset_index(drop=True), ordered_df], ignore_index=True)
+        avg_score = combined_df['スコア'].mean()
         if avg_score > best_score:
             best_score = avg_score
-            best_order = perm
+            best_order = combined_df
 
-    optimized_target_df = pd.DataFrame({'ID': best_order})
-    optimized_target_df['Score'] = optimized_target_df['ID'].apply(lambda x: df[df['ID'] == x]['Score'].values[0])
-
-    final_df = pd.concat([fixed_df, optimized_target_df], ignore_index=True)
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Optimized Assignment"
-    ws.append(["ID", "Score"])
-    for _, row in final_df.iterrows():
-        ws.append([row['ID'], row['Score']])
-    wb.save("optimized_assignment.xlsx")
+    # 結果をExcelに保存
+    output_path = "optimized_assignment.xlsx"
+    best_order.to_excel(output_path, index=False)
+    return output_path
