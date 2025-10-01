@@ -1,5 +1,5 @@
 import streamlit as st
-from optimized_assignment import run_optimization
+from optimizedassignment import run_optimization
 
 st.title("最適化振り分けアプリ（軽量版）")
 
