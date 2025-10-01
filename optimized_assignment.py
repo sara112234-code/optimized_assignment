@@ -2,31 +2,52 @@ import pandas as pd
 import itertools
 
 def run_optimization(uploaded_file):
-    # Read the uploaded Excel file
-    df = pd.read_excel(uploaded_file, engine='openpyxl')
+    df = pd.read_excel(uploaded_file)
 
-    # 固定項目（ID 1〜13）を抽出
-    fixed_df = df[df['固定'] == 1].copy()
+    # Must Pair と Must Separate の定義（必要に応じて変更）
+    must_pair = [(2, 14), (5, 15)]
+    must_separate = [(3, 16), (6, 17)]
 
-    # 最適化対象（ID 14〜）を抽出
-    target_df = df[df['固定'] != 1].copy()
+    # ID 1〜13 を固定とみなす
+    fixed_ids = set(range(1, 14))
+
+    # Must Pair の ID を固定に追加
+    for pair in must_pair:
+        fixed_ids.update(pair)
+
+    # 固定項目と最適化対象に分割
+    fixed_df = df[df['ID'].isin(fixed_ids)].copy()
+    optimize_df = df[~df['ID'].isin(fixed_ids)].copy()
+
+    # 最適化対象の ID リスト
+    optimize_ids = optimize_df['ID'].tolist()
 
     # 最適化対象の順列を生成
-    permutations = list(itertools.permutations(target_df.index))
-
     best_score = -1
     best_order = None
+    for perm in itertools.permutations(optimize_ids):
+        # Must Separate のチェック
+        invalid = False
+        for a, b in must_separate:
+            for i in range(len(perm) - 1):
+                if (perm[i] == a and perm[i+1] == b) or (perm[i] == b and perm[i+1] == a):
+                    invalid = True
+                    break
+            if invalid:
+                break
+        if invalid:
+            continue
 
-    # 各順列についてスコア平均を計算
-    for perm in permutations:
-        ordered_df = target_df.loc[list(perm)].reset_index(drop=True)
-        combined_df = pd.concat([fixed_df.reset_index(drop=True), ordered_df], ignore_index=True)
-        avg_score = combined_df['スコア'].mean()
+        # スコア平均の計算
+        scores = [optimize_df[optimize_df['ID'] == i]['スコア'].values[0] for i in perm]
+        avg_score = sum(scores) / len(scores)
         if avg_score > best_score:
             best_score = avg_score
-            best_order = combined_df
+            best_order = perm
 
-    # 結果をExcelに保存
-    output_path = "optimized_assignment.xlsx"
-    best_order.to_excel(output_path, index=False)
-    return output_path
+    # 最適順序で並べ替え
+    best_optimize_df = pd.concat([optimize_df[optimize_df['ID'] == i] for i in best_order])
+
+    # 最終結果を結合して保存
+    final_df = pd.concat([fixed_df, best_optimize_df])
+    final_df.to_excel("optimized_assignment.xlsx", index=False)
