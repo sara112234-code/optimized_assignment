@@ -1,7 +1,7 @@
 import streamlit as st
 from optimizedassignment import run_optimization
 
-st.title("最適化振り分けアプリ（軽量版）")
+st.title("最適化振り分けアプリ（完全版）")
 
 uploaded_file = st.file_uploader("Excelファイルをアップロードしてください", type=["xlsx"])
 

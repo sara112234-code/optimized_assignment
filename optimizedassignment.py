@@ -2,84 +2,86 @@ import pandas as pd
 import random
 
 def run_optimization(input_excel_path):
-    # Excelファイルを読み込む（IDとスコア列を取得）
     df = pd.read_excel(input_excel_path, engine='openpyxl')
 
-    # 列名の正規化（ID列とスコア列を探す）
-    id_col = None
-    score_col = None
-    for col in df.columns:
-        if str(col).strip().lower() in ['id', 'no.', '番号']:
-            id_col = col
-        if str(col).strip().lower() in ['スコア', 'average score', 'score']:
-            score_col = col
-    if id_col is None:
-        raise ValueError("ID列が見つかりません。列名は 'ID' にしてください。")
-    if score_col is None:
-        raise ValueError("スコア列が見つかりません。列名は 'スコア' または 'average score' にしてください。")
+    # 列名の正規化
+    id_col = next((col for col in df.columns if str(col).strip().lower() in ['id', 'no.', '番号']), None)
+    score_col = next((col for col in df.columns if str(col).strip().lower() in ['スコア', 'average score', 'score']), None)
+    if id_col is None or score_col is None:
+        raise ValueError("ID列またはスコア列が見つかりません。")
 
-    # 固定項目（IDが1〜13）を抽出
-    fixed_df = df[df[id_col].between(1, 13)].copy()
+    # 関係性列の抽出
+    def extract_relations(row, colname):
+        if pd.isna(row[colname]):
+            return []
+        return [int(x) for x in str(row[colname]).split(',') if x.strip().isdigit()]
 
-    # Must PairとMust Separateのルール（例）
-    must_pair = [(3, 16), (5, 18)]
-    must_separate = [(6, 17), (8, 19)]
+    relations = {'must_separate': {}, 'must_pair': {}, 'prefer_separate': {}, 'prefer_pair': {}}
+    for idx, row in df.iterrows():
+        id_val = row[id_col]
+        for key in relations:
+            rel_ids = extract_relations(row, key.replace('_', ' ').title())
+            if id_val not in relations[key]:
+                relations[key][id_val] = set()
+            relations[key][id_val].update(rel_ids)
 
-    # 固定項目にMust PairのIDを追加（重複を避ける）
-    pair_ids = set([i for pair in must_pair for i in pair])
-    for pid in pair_ids:
-        if pid not in fixed_df[id_col].values:
-            pair_row = df[df[id_col] == pid]
-            if not pair_row.empty:
-                fixed_df = pd.concat([fixed_df, pair_row], ignore_index=True)
-
-    # 最適化対象（固定以外）
-    fixed_ids = fixed_df[id_col].tolist()
-    remaining_df = df[~df[id_col].isin(fixed_ids)].copy()
-
-    # 最適化：3グループに分ける（空行を挿入し、Must Separateを厳密にチェック）
-    best_groups = None
-    best_score = float('inf')
-    remaining_ids = remaining_df[id_col].tolist()
+    # グループ構成（m15f20, m15f21, m14f21）
+    group_limits = [{'m': 15, 'f': 20}, {'m': 15, 'f': 21}, {'m': 14, 'f': 21}]
+    best_assignment = None
+    best_score_var = float('inf')
 
     for _ in range(1000):
-        random.shuffle(remaining_ids)
+        shuffled = df.sample(frac=1).reset_index(drop=True)
         groups = [[], [], []]
-        for i, rid in enumerate(remaining_ids):
-            groups[i % 3].append(rid)
-
-        # Must Separateチェック：同じグループに含まれていないか
+        gender_counts = [{'m': 0, 'f': 0} for _ in range(3)]
         valid = True
-        for a, b in must_separate:
-            for group in groups:
-                if a in group and b in group:
-                    valid = False
-                    break
-            if not valid:
+
+        for _, row in shuffled.iterrows():
+            id_val = row[id_col]
+            gender = row['gender']
+            assigned = False
+
+            for i in range(3):
+                if gender_counts[i][gender] < group_limits[i][gender]:
+                    conflict = False
+                    for other in groups[i]:
+                        for rule in ['must_separate']:
+                            if id_val in relations[rule] and other in relations[rule][id_val]:
+                                conflict = True
+                                break
+                        if conflict:
+                            break
+                    if not conflict:
+                        groups[i].append(id_val)
+                        gender_counts[i][gender] += 1
+                        assigned = True
+                        break
+            if not assigned:
+                valid = False
                 break
+
         if not valid:
             continue
 
-        # 各グループのスコア平均の分散を計算
+        # スコア平均の分散を計算
         variances = []
         for group in groups:
-            scores = remaining_df[remaining_df[id_col].isin(group)][score_col]
+            scores = df[df[id_col].isin(group)][score_col]
             if not scores.empty:
                 variances.append(scores.mean())
-        score_variance = pd.Series(variances).var()
+        score_var = pd.Series(variances).var()
 
-        if score_variance < best_score:
-            best_score = score_variance
-            best_groups = groups
+        if score_var < best_score_var:
+            best_score_var = score_var
+            best_assignment = groups
 
-    # 最終結果を構築（空行を挿入）
-    result_df = fixed_df.copy()
-    for group in best_groups:
-        group_df = remaining_df[remaining_df[id_col].isin(group)]
-        result_df = pd.concat([result_df, group_df, pd.DataFrame({id_col: [''], score_col: ['']})], ignore_index=True)
+    # 結果の構築
+    result_df = pd.DataFrame()
+    for i, group in enumerate(best_assignment):
+        group_df = df[df[id_col].isin(group)].copy()
+        group_df['Group'] = f'Group {i+1}'
+        result_df = pd.concat([result_df, group_df], ignore_index=True)
 
-    # 結果を保存
-    output_excel = "optimized_assignment.xlsx"
+    output_excel = "optimized_assignment_result.xlsx"
     result_df.to_excel(output_excel, index=False)
-
     return output_excel
